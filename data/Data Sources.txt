@@ -1,0 +1,11 @@
+Experiments rely upon the NetCDF version of various files 
+found at https://cgl.ethz.ch/research/visualization/data.php. These can be found under:
+Cylinder Flow (Synthetic): https://cgl.ethz.ch/Downloads/Data/ScientificData/jungtelziemniak2d_nc.zip
+Heated Cylinder with Boussinesq Approximation: https://cgl.ethz.ch/Downloads/Data/ScientificData/boussinesq2d_nc.zip
+Cylinder Flow Around Corners: https://cgl.ethz.ch/Downloads/Data/ScientificData/pipedcylinder2d_nc.zip
+Research Vessel Tangaroa: https://cgl.ethz.ch/Downloads/Data/ScientificData/tangaroa3d_nc.zip
+
+The following files are assumed to be in .mat format, and may require some manipulation on your part to get them into the proper format
+The sea surface temperature dataset comes from https://psl.noaa.gov/repository/entry/show?entryid=12159560-ab82-48a1-b3e4-88ace20475cd. It is truncated from 1727 down to 200 frames.
+The cylinderFlowKarmanTSVDM2Experiment script uses a truncated version of the Cylinder Flow with von Karman Vortex Street data found at https://cgl.ethz.ch/research/visualization/data.php. It is truncated from 1501 down to 200 frames.
+CYLINDER_ALL.mat: http://dmdbook.com/. It's the CYLINDER_ALL.mat file inside of the DATA.zip file.
