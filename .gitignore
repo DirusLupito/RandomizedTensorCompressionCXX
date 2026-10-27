@@ -70,3 +70,6 @@ Testing/
 # Data
 *.mat
 *.nc
+
+# External dependencies
+thirdparty/
