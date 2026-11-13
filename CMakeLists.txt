@@ -28,7 +28,15 @@ set_target_properties(netcdf_cxx4 PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${NETCDF_CXX4_INCLUDE_DIR}"
     INTERFACE_LINK_LIBRARIES netCDF::netcdf)
 
-add_executable(tensor_compression src/main.cpp src/mode3_tensor_matrix_product.hpp)
+add_executable(tensor_compression
+    src/main.cpp
+    src/tensor.cpp
+    src/tensor.hpp
+    src/permute.cpp
+    src/permute.hpp
+    src/tmprod.cpp
+    src/tmprod.hpp
+    src/mode3_tensor_matrix_product.hpp)
 target_link_libraries(tensor_compression PRIVATE Eigen3::Eigen netcdf_cxx4)
 if(NOT RTC_OUTPUT_DIRECTORY)
     set(RTC_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
