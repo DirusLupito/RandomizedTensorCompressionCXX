@@ -1,0 +1,143 @@
+\documentclass[11pt,letterpaper, onecolumn]{exam} %11 pt is font size, letterpaper is the paper size (think A4), onecolumn is the layout
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx} %For adding images
+\usepackage{xcolor} %For coloring the solution box 
+\usepackage{algorithm, algorithmic}
+\usepackage[lmargin=1.0in, tmargin=1.0in]{geometry}  %For centering solution box
+\lhead{Alex Mize, Erik Svanes}
+\rhead{Section 001}
+
+% Latex complains about overfull \hbox unless this is set
+\hbadness=99999
+
+% \chead{\hline} % Un-comment to draw line below header
+\thispagestyle{empty}   %For removing header/footer from page 1
+
+%             ======================================
+% Defines new commands in order to quicken the speed of writing homework
+
+\newcommand{\abs}[1]{\lvert #1 \rvert}          % absolute value
+\newcommand{\norm}[1]{\lVert #1 \rVert}         % norm
+\newcommand{\ip}[2]{\langle #1,\, #2\rangle}    % ip = inner product
+\newcommand{\sstrut}{\rule[-3pt]{0pt}{15pt}}
+
+
+\newcommand{\Cal}{\mathcal}                     % Calligraphic - caps only
+\newcommand{\mbf}{\mathbf}					 % math bold
+\newcommand{\tbf}{\textbf}
+
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\F}{\mathbb{F}}
+\newcommand{\mc}[1]{\mathcal{#1}}
+\newcommand{\mb}[1]{\mathbb{#1}}
+\newcommand{\B}[1]{\boldsymbol{#1}}
+\newcommand{\T}[1]{\boldsymbol{\mathcal{#1}}}
+\newcommand{\Th}[1]{
+\if A#1%                 
+    \skew{7}\widehat{\boldsymbol{\mathcal{#1}}}%  
+  \else
+    \if S#1%                   
+      \skew{4}\widehat{\boldsymbol{\mathcal{#1}}}%    % Result for S (adjusted skew value as an example)
+    \else
+      \skew{2}\widehat{\boldsymbol{\mathcal{#1}}}%            % Result for any other letter
+    \fi
+  \fi
+}
+\newcommand{\unfold}[1]{\mathsf{unfold}(#1)}
+\newcommand{\fold}[1]{\mathsf{fold}(#1)}
+\newcommand{\starM}{\star_{\B{M}}}
+\renewcommand{\t}{^*}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+
+
+% Solution box style configurations
+
+\unframedsolutions %This will remove the default box around the solution
+\shadedsolutions %This will add a background color to the solution
+\definecolor{SolutionColor}{rgb}{0.9,0.9,1} %Defines the color of the solution box, in this case a light blue
+\renewcommand{\solutiontitle}{}
+
+\begin{document}
+
+\hrule
+\begin{center}
+\Large 
+\tbf{CSC 548 Section 001 - Final Proposal}\\
+Alex Mize, Erik Svanes
+\end{center}
+\hrule
+
+%\rule{\textwidth}{0.4pt}
+\pointsdroppedatright   %Self-explanatory
+\printanswers % Makes it so that the things inside the \begin{solution}...\end{solution} environment are actually displayed on the compiled document
+
+\section*{Problem}
+We are curious about the performance of MATLAB implemented linear algebra algorithms (as implemented in \cite{kilmer2021tensor}) compared to those implemented in lower level languages such as FORTRAN and C/C++. Do all the abstractions added by MATLAB significantly hamper the performance of algorithms implemented in MATLAB? Or does the overhead get amortized out?
+\\\\
+We intend to gather concrete information to settle this debate over MATLAB versus C++ by comparing two implementations of \ref{alg:tSVDMI} and \ref{alg:tSVDMII} on MATLAB and C++.
+
+\section*{Plan}
+\begin{description}
+  \item[Milestone 1:] Finish MATLAB benchmark by October 1st.
+  \item[Milestone 2:] Algorithm 1 implementation by October 16th.
+  \item[Milestone 3:] Algorithm 2 implementation by November 1st.
+  \item[Milestone 4:] Presentation by November 18th.
+  \item[Milestone 5:] Full report by December 7th.
+\end{description}
+
+\section*{Method}
+We will be benchmarking both MATLAB and our new code using matrices from \\ \verb|https://cgl.ethz.ch/research/visualization/data.php|.
+We intend to use the Cylinder Flow with von Karman Vortex Street, the Heated Cylinder with Boussinesq Approximation, and the Cylinder Flow Around Corners.
+\\\\
+We will benchmark using one of our own Windows machines (see the machine section for more details). We will compare performance in both the singlethreaded and multithreaded environments. We intend to average runtimes over five runs to reduce the effects of any anomalies in running time. We also intend to try varying levels of compression within the algorithms themselves. For algorithm \ref{alg:tSVDMI}, we intend to use a uniform truncation rank across all modes of the tensor. In \ref{alg:tSVDMII} we intend to use $\gamma \in \{.9,.99,.999,.9999,.99999,.999999\}.$
+\\\\
+While we will be implementing algorithms \ref{alg:tSVDMI} and \ref{alg:tSVDMII} ourselves in C++ 23, we will be using author Alex Mize's previous single and multithreaded MATLAB implementations of these algorithms as the baseline, rather than also reimplement the MATLAB code. Furthermore, we will be using two external libraries. The first is called \verb|Eigen| for our SVD routine, rather than implementing our own SVD from scratch. The second being \verb|netcdf-cxx4| for I/O from the NetCDF data files.
+\\\\
+Other than this, all code will be developed in C++ using the standard library. We will develop for both Windows and Linux. We intend to use the C++ \verb|<thread>| header and in general use cross platform compatible code as opposed to using OS specific headers e.g. \verb|windows.h| or \verb|unistd.h|.
+
+\section*{Machine}
+We will primarily be benchmarking our results on a machine equipped with a 32 core AMD-7975WX with Simultaneous Multi-threading disabled, and thus 32 threads. It has 128 GB DDR5 RAM in and 8x16 style setup. No overclocking will be done. 
+
+\section*{Appendix}
+\begin{algorithm}
+\begin{algorithmic}[1]
+\caption{\label{alg:tSVDMI}$\starM$-SVDI~\cite{kilmer2021tensor}.}
+    \REQUIRE $\T{A}\in\F^{m\times p\times n}$, unitary $\B{M}\in \F^{n\times n}$, truncation rank $k$
+    \STATE $\Th{A} =\T{A}\times_3\B{M} $
+    \FOR{$i = 1,,\ldots,n$}
+    \STATE Compute $k$ leading singular triples: $\Th{U}_k^{(i)}, \Th{S}_k^{(i)}, \text{and}\Th{V}_k^{(i)}$ of $\Th{A}^{(i)}$ .
+    \ENDFOR
+    \RETURN$\T{U} = \Th{U}\times_3 \B{M}^*$, $\T{S} = \Th{S}\times_3 \B{M}^*$, and $\T{V} = \Th{V}\times_3 \B{M}^*$ 
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\begin{algorithmic}[1]
+    \caption{\label{alg:tSVDMII}$\starM$-SVDII (reproduced from Ref.~\cite{kilmer2021tensor}).}
+    \REQUIRE $\T{A}\in\F^{m\times p\times n}$, unitary $\B{M}\in \F^{n\times n}$, energy $\gamma\in [0,1]$. 
+    \STATE Compute full $\starM$-SVD  $\T{A} = \T{U}\starM\T{S}\starM\T{V}^* $. 
+    \STATE Concatenate all non-zero elements of $\Th{S}_{j,j,i}^2$ into a long vector $\B{v}$ for all $i,j$.
+    \STATE $\B{v} \gets \texttt{sort(v,'descend')}$. 
+    \STATE Define $\B{w}$ the vector of cumulative sums of $\B{v}$, i.e. $\B{w}_j = \sum_{i=1}^j \B{v}_i$.  
+    \STATE  Find the first index $J$ such that $\B{w}_J/\|\Th{S}\|_F^2 > \gamma$.
+    \STATE Take $\tau = \B{w}_J$. 
+    \FOR{$i = 1,2,\ldots, n$}
+        \STATE Let $\rho_i$ be the number of singular values of $\Th{A}^{(i)}$ greater than or equal to $\tau$
+        \STATE Keep only $\Th{U}_{:,1:\rho_i,i}$, $\Th{S}_{1:\rho_i,1:\rho_i,i}$, and $\Th{V}_{:,1:\rho_i,i}$
+    \ENDFOR
+    \RETURN Truncated $\Th{U},\Th{S},\Th{V}$. 
+\end{algorithmic}
+\end{algorithm}
+
+\bibliography{refs}
+\bibliographystyle{abbrv}
+
+
+\end{document}
+
