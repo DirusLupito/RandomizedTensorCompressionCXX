@@ -36,7 +36,9 @@ add_executable(tensor_compression
     src/permute.hpp
     src/tmprod.cpp
     src/tmprod.hpp
-    src/mode3_tensor_matrix_product.hpp)
+    src/mode3_tensor_matrix_product.hpp
+    src/tsvdm.cpp
+    src/tsvdm.hpp)
 target_link_libraries(tensor_compression PRIVATE Eigen3::Eigen netcdf_cxx4)
 if(NOT RTC_OUTPUT_DIRECTORY)
     set(RTC_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

@@ -1,9 +1,12 @@
 #include "mode3_tensor_matrix_product.hpp"
+#include "tsvdm.hpp"
 
+#include <Eigen/QR>
 #include <Eigen/SVD>
 #include <netcdf>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -115,6 +118,131 @@ static void PrintIdentityMode3Product() {
 }
 
 /**
+ * Checks the full star-M SVD on random tensors with a random orthogonal
+ * transform, in both full and economy form. In the transform domain, each
+ * frontal slice of U * S * V^T must reproduce the corresponding slice of the
+ * transformed tensor, with nonnegative singular values in descending order.
+ * The original domain factors must return to the transform domain factors
+ * when multiplied by M, since M undoes the M^T that produced them.
+ *
+ * @throws std::runtime_error if a factor has the wrong dimensions, if the
+ * slices are not reproduced, if the singular values are out of order, or if
+ * the two domains disagree.
+ * @throws std::bad_alloc if there is not enough memory for the tensors or
+ * temporary data.
+ */
+static void CheckTsvdm() {
+    // A tall shape (m > p) and a wide shape (m < p), so the full and economy
+    // factors have different sizes, and a mix-up between m and p is caught.
+    const std::array<std::array<Eigen::Index, 3>, 2> shapes{
+        {{6, 4, 5}, {3, 5, 4}}};
+    std::mt19937 generator(548);
+    std::uniform_real_distribution<double> distribution(-1.0, 1.0);
+
+    // Every check is a relative error, so rounding should keep each one near
+    // machine precision for these small tensors.
+    constexpr double tolerance = 1e-12;
+    for (const auto &[m, p, n] : shapes) {
+        tensor_compression::Tensor tensor{{m, p, n},
+                                          Eigen::VectorXd(m * p * n)};
+        for (Eigen::Index i = 0; i < tensor.values.size(); ++i) {
+            tensor.values(i) = distribution(generator);
+        }
+
+        // The Q factor of a random matrix's QR decomposition is a random
+        // orthogonal matrix, which makes a valid transform.
+        Eigen::MatrixXd random(n, n);
+        for (Eigen::Index i = 0; i < random.size(); ++i) {
+            random(i) = distribution(generator);
+        }
+        const Eigen::MatrixXd transform =
+            Eigen::HouseholderQR<Eigen::MatrixXd>(random).householderQ();
+        const tensor_compression::Tensor transformed =
+            tensor_compression::Mode3TensorMatrixProduct(tensor, transform);
+
+        for (const bool economy : {false, true}) {
+            const tensor_compression::TsvdmFactors inTransform =
+                tensor_compression::Tsvdm(tensor, transform, true, economy);
+            const tensor_compression::TsvdmFactors inOriginal =
+                tensor_compression::Tsvdm(tensor, transform, false, economy);
+
+            // Full factors are m x m, m x p, and p x p per slice. Economy
+            // factors replace each m or p beside S with min(m, p).
+            const Eigen::Index q = std::min(m, p);
+            const Eigen::Index uColumns = economy ? q : m;
+            const Eigen::Index vColumns = economy ? q : p;
+            for (const tensor_compression::TsvdmFactors *factors :
+                 {&inTransform, &inOriginal}) {
+                if (factors->u.dimensions !=
+                        std::vector<Eigen::Index>{m, uColumns, n} ||
+                    factors->s.dimensions !=
+                        std::vector<Eigen::Index>{uColumns, vColumns, n} ||
+                    factors->v.dimensions !=
+                        std::vector<Eigen::Index>{p, vColumns, n}) {
+                    throw std::runtime_error(
+                        "star-M SVD factors have the wrong dimensions.");
+                }
+            }
+
+            // Each transform domain slice must be an ordinary matrix SVD of
+            // the corresponding transformed slice.
+            double sliceError = 0.0;
+            for (Eigen::Index i = 0; i < n; ++i) {
+                const auto slice =
+                    tensor_compression::FrontalSlice(transformed, i);
+                const Eigen::MatrixXd product =
+                    tensor_compression::FrontalSlice(inTransform.u, i) *
+                    tensor_compression::FrontalSlice(inTransform.s, i) *
+                    tensor_compression::FrontalSlice(inTransform.v, i)
+                        .transpose();
+                sliceError = std::max(sliceError,
+                                      (product - slice).norm() / slice.norm());
+
+                const Eigen::VectorXd singularValues =
+                    tensor_compression::FrontalSlice(inTransform.s, i)
+                        .diagonal();
+                for (Eigen::Index k = 0; k < singularValues.size(); ++k) {
+                    if (singularValues(k) < 0.0 ||
+                        (k > 0 && singularValues(k) > singularValues(k - 1))) {
+                        throw std::runtime_error(
+                            "star-M SVD singular values are not nonnegative "
+                            "and descending.");
+                    }
+                }
+            }
+
+            // Multiplying the original domain factors by M must give back the
+            // transform domain factors exactly, up to rounding.
+            double domainError = 0.0;
+            const std::array<std::pair<const tensor_compression::Tensor *,
+                                       const tensor_compression::Tensor *>,
+                             3>
+                pairs{{{&inOriginal.u, &inTransform.u},
+                       {&inOriginal.s, &inTransform.s},
+                       {&inOriginal.v, &inTransform.v}}};
+            for (const auto &[original, expected] : pairs) {
+                const tensor_compression::Tensor returned =
+                    tensor_compression::Mode3TensorMatrixProduct(*original,
+                                                                 transform);
+                domainError = std::max(
+                    domainError, (returned.values - expected->values).norm() /
+                                     expected->values.norm());
+            }
+
+            std::cout << "star-M SVD of a random " << m << "x" << p << "x"
+                      << n << " tensor (" << (economy ? "economy" : "full")
+                      << ")\nLargest relative slice error: " << sliceError
+                      << "\nLargest relative domain error: " << domainError
+                      << "\n";
+            if (sliceError > tolerance || domainError > tolerance) {
+                throw std::runtime_error("star-M SVD verification failed.");
+            }
+        }
+    }
+    std::cout << "star-M SVD verification passed.\n\n";
+}
+
+/**
  * Helper to recursively print the metadata of a NetCDF group and its children.
  */
 static void PrintGroupMetadata(const netCDF::NcGroup &group,
@@ -204,6 +332,7 @@ int main(int argc, char *argv[]) {
         }
         PrintIdentitySvd();
         PrintIdentityMode3Product();
+        CheckTsvdm();
         const std::filesystem::path directory = argc == 2 ? argv[1] : "data";
         return PrintDataMetadata(directory) ? EXIT_SUCCESS : EXIT_FAILURE;
     } catch (const std::exception &error) {
