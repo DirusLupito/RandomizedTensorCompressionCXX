@@ -61,4 +61,50 @@ Eigen::Index ElementCount(std::span<const Eigen::Index> dimensions);
  */
 void ValidateTensor(const Tensor &tensor);
 
+/**
+ * Views one frontal slice of a tensor as a matrix, corresponding to
+ * T(:, :, slice + 1) in MATLAB. Because the entries are stored in column-major
+ * order, each frontal slice occupies one contiguous block of the data vector,
+ * so the view refers to the tensor's own entries rather than a copy. Writing
+ * through the view modifies the tensor.
+ *
+ * @param tensor The tensor to view. It must have two or three dimensions, and
+ * its entries must agree with them. A two-dimensional tensor has a single
+ * frontal slice, as in MATLAB. The tensor must outlive the returned view, and
+ * its entries must not be reallocated while the view is in use.
+ * @param slice The zero-based index of the frontal slice, from 0 up to but not
+ * including the size of the third dimension.
+ *
+ * @return An m x p matrix view of the slice, where m and p are the first two
+ * dimensions of the tensor.
+ *
+ * @throws std::invalid_argument if the tensor's dimensions or number of
+ * entries are invalid, or if it has more than three dimensions.
+ * @throws std::out_of_range if the slice index is outside the third dimension.
+ * @throws std::length_error if the storage size exceeds the range of
+ * Eigen::Index.
+ */
+Eigen::Map<Eigen::MatrixXd> FrontalSlice(Tensor &tensor, Eigen::Index slice);
+
+/**
+ * Views one frontal slice of a tensor as a read-only matrix. This behaves
+ * exactly like the modifiable overload, but the entries cannot be changed
+ * through the view.
+ *
+ * @param tensor The tensor to view. It must have two or three dimensions, and
+ * its entries must agree with them. The tensor must outlive the returned view.
+ * @param slice The zero-based index of the frontal slice, from 0 up to but not
+ * including the size of the third dimension.
+ *
+ * @return An m x p read-only matrix view of the slice.
+ *
+ * @throws std::invalid_argument if the tensor's dimensions or number of
+ * entries are invalid, or if it has more than three dimensions.
+ * @throws std::out_of_range if the slice index is outside the third dimension.
+ * @throws std::length_error if the storage size exceeds the range of
+ * Eigen::Index.
+ */
+Eigen::Map<const Eigen::MatrixXd> FrontalSlice(const Tensor &tensor,
+                                               Eigen::Index slice);
+
 } // namespace tensor_compression

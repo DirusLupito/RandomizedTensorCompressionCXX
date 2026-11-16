@@ -44,4 +44,53 @@ void ValidateTensor(const Tensor &tensor) {
     }
 }
 
+/**
+ * Finds where a frontal slice begins in a tensor's data vector, checking that
+ * the tensor can be viewed slice by slice and that the slice exists. Both
+ * FrontalSlice overloads share this so their checks cannot drift apart.
+ *
+ * @param tensor The tensor containing the slice. It must have two or three
+ * dimensions, and its entries must agree with them.
+ * @param slice The zero-based index of the frontal slice.
+ *
+ * @return The index of the slice's first entry in the data vector.
+ *
+ * @throws std::invalid_argument if the tensor's dimensions or number of
+ * entries are invalid, or if it has more than three dimensions.
+ * @throws std::out_of_range if the slice index is outside the third dimension.
+ * @throws std::length_error if the storage size exceeds the range of
+ * Eigen::Index.
+ */
+static Eigen::Index FrontalSliceOffset(const Tensor &tensor,
+                                       Eigen::Index slice) {
+    ValidateTensor(tensor);
+    if (tensor.dimensions.size() > 3) {
+        throw std::invalid_argument(
+            "Frontal slices require a tensor with at most three axes.");
+    }
+
+    // A two-dimensional tensor is a single frontal slice, as in MATLAB.
+    const Eigen::Index slices =
+        tensor.dimensions.size() == 3 ? tensor.dimensions[2] : 1;
+    if (slice < 0 || slice >= slices) {
+        throw std::out_of_range("Frontal slice index is out of range.");
+    }
+    return slice * tensor.dimensions[0] * tensor.dimensions[1];
+}
+
+Eigen::Map<Eigen::MatrixXd> FrontalSlice(Tensor &tensor, Eigen::Index slice) {
+    const Eigen::Index offset = FrontalSliceOffset(tensor, slice);
+    return Eigen::Map<Eigen::MatrixXd>(tensor.values.data() + offset,
+                                       tensor.dimensions[0],
+                                       tensor.dimensions[1]);
+}
+
+Eigen::Map<const Eigen::MatrixXd> FrontalSlice(const Tensor &tensor,
+                                               Eigen::Index slice) {
+    const Eigen::Index offset = FrontalSliceOffset(tensor, slice);
+    return Eigen::Map<const Eigen::MatrixXd>(tensor.values.data() + offset,
+                                             tensor.dimensions[0],
+                                             tensor.dimensions[1]);
+}
+
 } // namespace tensor_compression
