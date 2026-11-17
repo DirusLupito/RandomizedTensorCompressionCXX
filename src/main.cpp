@@ -1,4 +1,5 @@
 #include "mode3_tensor_matrix_product.hpp"
+#include "truncate_tsvdm.hpp"
 #include "tsvdm.hpp"
 
 #include <Eigen/QR>
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -118,6 +120,74 @@ static void PrintIdentityMode3Product() {
 }
 
 /**
+ * Creates a tensor with entries drawn uniformly from [-1, 1], so the checks
+ * run on generic data with no special structure.
+ *
+ * @param dimensions The size of the tensor along each axis. Each size must be
+ * nonnegative.
+ * @param generator The random number generator to draw from. A seeded
+ * generator makes the checks repeatable. Drawing advances its state.
+ *
+ * @return The random tensor.
+ *
+ * @throws std::invalid_argument if a dimension is negative.
+ * @throws std::length_error if the storage size cannot be represented.
+ * @throws std::bad_alloc if there is not enough memory for the tensor.
+ */
+static tensor_compression::Tensor
+RandomTensor(const std::vector<Eigen::Index> &dimensions,
+             std::mt19937 &generator) {
+    std::uniform_real_distribution<double> distribution(-1.0, 1.0);
+    tensor_compression::Tensor tensor{
+        dimensions,
+        Eigen::VectorXd(tensor_compression::ElementCount(dimensions))};
+    for (Eigen::Index i = 0; i < tensor.values.size(); ++i) {
+        tensor.values(i) = distribution(generator);
+    }
+    return tensor;
+}
+
+/**
+ * Creates a random orthogonal matrix to use as a star-M transform. The Q factor
+ * of a random matrix's QR decomposition is orthogonal, which makes a valid
+ * transform with no special structure, unlike the identity or a DCT.
+ *
+ * @param size The number of rows and columns, n. Must be nonnegative.
+ * @param generator The random number generator to draw from. Drawing advances
+ * its state.
+ *
+ * @return An n x n orthogonal matrix.
+ *
+ * @throws std::bad_alloc if there is not enough memory for the matrix or
+ * temporary data.
+ */
+static Eigen::MatrixXd RandomOrthogonal(Eigen::Index size,
+                                        std::mt19937 &generator) {
+    std::uniform_real_distribution<double> distribution(-1.0, 1.0);
+    Eigen::MatrixXd random(size, size);
+    for (Eigen::Index i = 0; i < random.size(); ++i) {
+        random(i) = distribution(generator);
+    }
+    return Eigen::HouseholderQR<Eigen::MatrixXd>(random).householderQ();
+}
+
+/**
+ * Checks whether two tensors have exactly the same dimensions and entries,
+ * with no rounding tolerance.
+ *
+ * @param left The first tensor to compare.
+ * @param right The second tensor to compare.
+ *
+ * @return true if the tensors are identical, false otherwise.
+ */
+static bool SameTensor(const tensor_compression::Tensor &left,
+                       const tensor_compression::Tensor &right) {
+    return left.dimensions == right.dimensions &&
+           left.values.size() == right.values.size() &&
+           left.values == right.values;
+}
+
+/**
  * Checks the full star-M SVD on random tensors with a random orthogonal
  * transform, in both full and economy form. In the transform domain, each
  * frontal slice of U * S * V^T must reproduce the corresponding slice of the
@@ -137,34 +207,23 @@ static void CheckTsvdm() {
     const std::array<std::array<Eigen::Index, 3>, 2> shapes{
         {{6, 4, 5}, {3, 5, 4}}};
     std::mt19937 generator(548);
-    std::uniform_real_distribution<double> distribution(-1.0, 1.0);
 
     // Every check is a relative error, so rounding should keep each one near
     // machine precision for these small tensors.
     constexpr double tolerance = 1e-12;
     for (const auto &[m, p, n] : shapes) {
-        tensor_compression::Tensor tensor{{m, p, n},
-                                          Eigen::VectorXd(m * p * n)};
-        for (Eigen::Index i = 0; i < tensor.values.size(); ++i) {
-            tensor.values(i) = distribution(generator);
-        }
-
-        // The Q factor of a random matrix's QR decomposition is a random
-        // orthogonal matrix, which makes a valid transform.
-        Eigen::MatrixXd random(n, n);
-        for (Eigen::Index i = 0; i < random.size(); ++i) {
-            random(i) = distribution(generator);
-        }
-        const Eigen::MatrixXd transform =
-            Eigen::HouseholderQR<Eigen::MatrixXd>(random).householderQ();
+        const tensor_compression::Tensor tensor =
+            RandomTensor({m, p, n}, generator);
+        const Eigen::MatrixXd transform = RandomOrthogonal(n, generator);
         const tensor_compression::Tensor transformed =
             tensor_compression::Mode3TensorMatrixProduct(tensor, transform);
 
         for (const bool economy : {false, true}) {
             const tensor_compression::TsvdmFactors inTransform =
-                tensor_compression::Tsvdm(tensor, transform, true, economy);
+                tensor_compression::Tsvdm(tensor, transform, {}, true, economy);
             const tensor_compression::TsvdmFactors inOriginal =
-                tensor_compression::Tsvdm(tensor, transform, false, economy);
+                tensor_compression::Tsvdm(tensor, transform, {}, false,
+                                          economy);
 
             // Full factors are m x m, m x p, and p x p per slice. Economy
             // factors replace each m or p beside S with min(m, p).
@@ -240,6 +299,159 @@ static void CheckTsvdm() {
         }
     }
     std::cout << "star-M SVD verification passed.\n\n";
+}
+
+/**
+ * Checks that truncated star-M SVD factors have MATLAB's zero-padded shapes,
+ * U m x r x n, S r x r x n, and V p x r x n, where r is the largest rank.
+ *
+ * @param factors The truncated factors to check.
+ * @param m The number of rows in each slice of the original tensor.
+ * @param p The number of columns in each slice of the original tensor.
+ * @param rank The largest rank kept in any slice, r.
+ * @param n The number of frontal slices.
+ *
+ * @throws std::runtime_error if any factor has other dimensions.
+ */
+static void CheckTruncatedShapes(const tensor_compression::TsvdmFactors &factors,
+                                 Eigen::Index m, Eigen::Index p,
+                                 Eigen::Index rank, Eigen::Index n) {
+    if (factors.u.dimensions != std::vector<Eigen::Index>{m, rank, n} ||
+        factors.s.dimensions != std::vector<Eigen::Index>{rank, rank, n} ||
+        factors.v.dimensions != std::vector<Eigen::Index>{p, rank, n}) {
+        throw std::runtime_error(
+            "Truncated star-M SVD factors have the wrong dimensions.");
+    }
+}
+
+/**
+ * Checks truncation of the star-M SVD on random tensors with a random
+ * orthogonal transform, in both full and economy form. Each truncated slice
+ * must hold exactly the leading singular triples of the untruncated transform
+ * domain factors, padded with zeros to the largest rank. Truncating inside
+ * Tsvdm must give exactly the same factors as calling TruncateTsvdm on its
+ * untruncated output. Ranks that do not fit the tensor must be rejected.
+ *
+ * @throws std::runtime_error if truncated factors have the wrong dimensions or
+ * entries, if Tsvdm's truncation disagrees with TruncateTsvdm, or if invalid
+ * ranks are accepted.
+ * @throws std::bad_alloc if there is not enough memory for the tensors or
+ * temporary data.
+ */
+static void CheckTruncateTsvdm() {
+    // The same tall and wide shapes as CheckTsvdm, so that reading m and p
+    // from the wrong factor would be caught for economy factors.
+    const std::array<std::array<Eigen::Index, 3>, 2> shapes{
+        {{6, 4, 5}, {3, 5, 4}}};
+    std::mt19937 generator(549);
+    for (const auto &[m, p, n] : shapes) {
+        const tensor_compression::Tensor tensor =
+            RandomTensor({m, p, n}, generator);
+        const Eigen::MatrixXd transform = RandomOrthogonal(n, generator);
+
+        // Uniform ranks of 0, 2, and min(m, p) cover an empty result, a typical
+        // truncation, and no truncation at all. The mixed ranks cycle through
+        // 0 to min(m, p), so one list holds both extremes, and the slices with
+        // smaller ranks need padding.
+        const Eigen::Index q = std::min(m, p);
+        const std::size_t count = static_cast<std::size_t>(n);
+        std::vector<Eigen::Index> mixed(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            mixed[i] = static_cast<Eigen::Index>(i) % (q + 1);
+        }
+        const std::array<std::vector<Eigen::Index>, 4> rankLists{
+            std::vector<Eigen::Index>(count, 0),
+            std::vector<Eigen::Index>(count, 2),
+            std::vector<Eigen::Index>(count, q), mixed};
+
+        for (const bool economy : {false, true}) {
+            const tensor_compression::TsvdmFactors untruncated =
+                tensor_compression::Tsvdm(tensor, transform, {}, true, economy);
+            for (const std::vector<Eigen::Index> &ranks : rankLists) {
+                const tensor_compression::TsvdmFactors truncated =
+                    tensor_compression::TruncateTsvdm(untruncated, ranks);
+                const Eigen::Index r = std::ranges::max(ranks);
+                CheckTruncatedShapes(truncated, m, p, r, n);
+
+                // Truncation only copies entries, so each slice must match
+                // its leading triples exactly, followed by zeros.
+                for (Eigen::Index i = 0; i < n; ++i) {
+                    const Eigen::Index k = ranks[static_cast<std::size_t>(i)];
+                    Eigen::MatrixXd u = Eigen::MatrixXd::Zero(m, r);
+                    u.leftCols(k) =
+                        tensor_compression::FrontalSlice(untruncated.u, i)
+                            .leftCols(k);
+                    Eigen::MatrixXd s = Eigen::MatrixXd::Zero(r, r);
+                    s.topLeftCorner(k, k) =
+                        tensor_compression::FrontalSlice(untruncated.s, i)
+                            .topLeftCorner(k, k);
+                    Eigen::MatrixXd v = Eigen::MatrixXd::Zero(p, r);
+                    v.leftCols(k) =
+                        tensor_compression::FrontalSlice(untruncated.v, i)
+                            .leftCols(k);
+                    if (tensor_compression::FrontalSlice(truncated.u, i) != u ||
+                        tensor_compression::FrontalSlice(truncated.s, i) != s ||
+                        tensor_compression::FrontalSlice(truncated.v, i) != v) {
+                        throw std::runtime_error(
+                            "Truncated star-M SVD slice does not hold exactly "
+                            "the leading singular triples.");
+                    }
+                }
+
+                // Tsvdm runs the same SVDs and the same copies, so its
+                // truncation must agree bit for bit. In the original domain,
+                // only the shapes are checked until reconstruction exists.
+                const tensor_compression::TsvdmFactors viaTsvdm =
+                    tensor_compression::Tsvdm(tensor, transform, ranks, true,
+                                              economy);
+                if (!SameTensor(viaTsvdm.u, truncated.u) ||
+                    !SameTensor(viaTsvdm.s, truncated.s) ||
+                    !SameTensor(viaTsvdm.v, truncated.v)) {
+                    throw std::runtime_error(
+                        "Tsvdm truncation disagrees with TruncateTsvdm.");
+                }
+                CheckTruncatedShapes(tensor_compression::Tsvdm(tensor,
+                                                               transform, ranks,
+                                                               false, economy),
+                                     m, p, r, n);
+            }
+            std::cout << "Truncated star-M SVD of a random " << m << "x" << p
+                      << "x" << n << " tensor ("
+                      << (economy ? "economy" : "full")
+                      << "): uniform 0, 2, " << q << ", and mixed ranks match\n";
+        }
+
+        // Too few ranks, a negative rank, and a rank above min(m, p) must all
+        // be rejected, both directly and through Tsvdm.
+        std::vector<Eigen::Index> tooFew(count - 1, 1);
+        std::vector<Eigen::Index> negative(count, 1);
+        negative.front() = -1;
+        std::vector<Eigen::Index> tooLarge(count, 1);
+        tooLarge.back() = q + 1;
+        const tensor_compression::TsvdmFactors untruncated =
+            tensor_compression::Tsvdm(tensor, transform, {}, true, false);
+        for (const std::vector<Eigen::Index> *ranks :
+             {&tooFew, &negative, &tooLarge}) {
+            bool truncateRejected = false;
+            try {
+                tensor_compression::TruncateTsvdm(untruncated, *ranks);
+            } catch (const std::invalid_argument &) {
+                truncateRejected = true;
+            }
+            bool tsvdmRejected = false;
+            try {
+                tensor_compression::Tsvdm(tensor, transform, *ranks, true,
+                                          false);
+            } catch (const std::invalid_argument &) {
+                tsvdmRejected = true;
+            }
+            if (!truncateRejected || !tsvdmRejected) {
+                throw std::runtime_error(
+                    "Invalid truncation ranks were accepted.");
+            }
+        }
+    }
+    std::cout << "Truncated star-M SVD verification passed.\n\n";
 }
 
 /**
@@ -333,6 +545,7 @@ int main(int argc, char *argv[]) {
         PrintIdentitySvd();
         PrintIdentityMode3Product();
         CheckTsvdm();
+        CheckTruncateTsvdm();
         const std::filesystem::path directory = argc == 2 ? argv[1] : "data";
         return PrintDataMetadata(directory) ? EXIT_SUCCESS : EXIT_FAILURE;
     } catch (const std::exception &error) {

@@ -1,6 +1,7 @@
 #include "tsvdm.hpp"
 
 #include "mode3_tensor_matrix_product.hpp"
+#include "truncate_tsvdm.hpp"
 
 #include <Eigen/SVD>
 
@@ -11,7 +12,8 @@
 namespace tensor_compression {
 
 TsvdmFactors Tsvdm(const Tensor &tensor, const Eigen::MatrixXd &transform,
-                   bool transformDomain, bool economy) {
+                   std::span<const Eigen::Index> ranks, bool transformDomain,
+                   bool economy) {
     ValidateTensor(tensor);
     if (tensor.dimensions.size() > 3) {
         throw std::invalid_argument(
@@ -69,15 +71,23 @@ TsvdmFactors Tsvdm(const Tensor &tensor, const Eigen::MatrixXd &transform,
         FrontalSlice(factors.s, i).diagonal() = svd.singularValues();
         FrontalSlice(factors.v, i) = svd.matrixV();
     }
+
+    // Only truncate if ranks are given. Truncation happens in the transform
+    // domain, where each slice's leading triples give its best approximation.
+    if (!ranks.empty()) {
+        factors = TruncateTsvdm(factors, ranks);
+    }
+
+    // If we are told to return in the transform domain, do so here.
     if (transformDomain) {
         return factors;
     }
 
     // Return to the original domain. Since M is orthogonal, its transpose is
     // its inverse.
-    factors.u = Tmprod(factors.u, transform, 3, 'T');
-    factors.s = Tmprod(factors.s, transform, 3, 'T');
-    factors.v = Tmprod(factors.v, transform, 3, 'T');
+    factors.u = Mode3TensorMatrixProduct(factors.u, transform.transpose());
+    factors.s = Mode3TensorMatrixProduct(factors.s, transform.transpose());
+    factors.v = Mode3TensorMatrixProduct(factors.v, transform.transpose());
     return factors;
 }
 
