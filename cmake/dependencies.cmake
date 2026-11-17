@@ -19,6 +19,13 @@ if(MSVC)
         -DCMAKE_C_FLAGS_INIT:STRING=/MP
         -DCMAKE_CXX_FLAGS_INIT:STRING=/MP)
 endif()
+if(NOT WIN32)
+    # Windows copies dependency DLLs beside the executable. Elsewhere, installed
+    # shared libraries find their own dependencies (netCDF -> HDF5 -> zlib) by
+    # embedding the local installation's library directory as a run path.
+    list(APPEND dependency_arguments
+        "-DCMAKE_INSTALL_RPATH:STRING=${dependency_prefix}/lib")
+endif()
 
 ExternalProject_Add(zlib
     URL https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz

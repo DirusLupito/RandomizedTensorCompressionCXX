@@ -21,6 +21,7 @@ build configuration="RelWithDebInfo":
 
 # Build the optimized executable with debug information.
 [windows]
+[linux]
 release: (build "RelWithDebInfo")
 
 # Build and run RelWithDebInfo. Optionally pass a data-directory path.
@@ -54,3 +55,41 @@ debug *args:
 [windows]
 clean configuration="RelWithDebInfo":
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/run-cmake.ps1 -Action clean -Configuration '{{configuration}}'
+
+# Configure the native build and download Eigen.
+[linux]
+configure configuration="RelWithDebInfo":
+    ./scripts/run-cmake.sh --action configure --configuration '{{configuration}}'
+
+# Download and build the pinned NetCDF/HDF5/zlib dependencies.
+[linux]
+fetch-deps configuration="RelWithDebInfo":
+    ./scripts/run-cmake.sh --action fetch-deps --configuration '{{configuration}}'
+
+# Build incrementally. Optimized builds include debug information.
+[linux]
+build configuration="RelWithDebInfo":
+    ./scripts/run-cmake.sh --action build --configuration '{{configuration}}'
+
+# Build and run RelWithDebInfo. Optionally pass a data-directory path.
+[linux]
+[positional-arguments]
+run *args:
+    ./scripts/run-cmake.sh --action run --configuration RelWithDebInfo -- "$@"
+
+# Run the existing optimized executable with debug information without building.
+[linux]
+[positional-arguments]
+nocompile *args:
+    ./scripts/run-cmake.sh --action nocompile --configuration RelWithDebInfo -- "$@"
+
+# Build and run without optimization. Optionally pass a data-directory path.
+[linux]
+[positional-arguments]
+debug *args:
+    ./scripts/run-cmake.sh --action run --configuration Debug -- "$@"
+
+# Clean the application while retaining built dependencies and configuration.
+[linux]
+clean configuration="RelWithDebInfo":
+    ./scripts/run-cmake.sh --action clean --configuration '{{configuration}}'
