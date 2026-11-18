@@ -33,6 +33,23 @@ struct TsvdmFactors {
 };
 
 /**
+ * Checks that star-M SVD factors are valid tensors whose shapes fit together,
+ * so that U(:, :, i) * S(:, :, i) * V(:, :, i)^T is defined for every slice.
+ * Functions that take factors call this before reading their entries. MATLAB
+ * reports a mismatch as an indexing or assignment error partway through, but
+ * this check reports it before any work is done.
+ *
+ * @param factors The factors to check. They are not modified.
+ *
+ * @throws std::invalid_argument if a factor's dimensions or number of entries
+ * are invalid, if a factor does not have exactly three dimensions, if U's
+ * column count differs from S's row count, if V's column count differs from
+ * S's column count, or if the factors have different numbers of slices.
+ * @throws std::length_error if a factor's storage size cannot be represented.
+ */
+void ValidateTsvdmFactors(const TsvdmFactors &factors);
+
+/**
  * Computes the star-M tensor SVD of a tensor with respect to an orthogonal
  * matrix, optionally truncated, corresponding to
  * TSVDMserial(A, M, rho, transform, econ) in MATLAB. This is the decomposition

@@ -1,4 +1,5 @@
 #include "mode3_tensor_matrix_product.hpp"
+#include "reconstruct_from_tsvdm.hpp"
 #include "truncate_tsvdm.hpp"
 #include "tsvdm.hpp"
 
@@ -455,6 +456,121 @@ static void CheckTruncateTsvdm() {
 }
 
 /**
+ * Checks that reconstructing untruncated star-M SVD factors gives back the
+ * original tensor, on random tensors with a random orthogonal transform, in
+ * both full and economy form. Economy factors drop only the parts of U and V
+ * that multiply zeros in S, so they must reconstruct the tensor as well as
+ * full factors do.
+ *
+ * @throws std::runtime_error if the reconstruction has the wrong dimensions or
+ * differs from the original tensor by more than the tolerance.
+ * @throws std::bad_alloc if there is not enough memory for the tensors or
+ * temporary data.
+ */
+static void CheckReconstructFromTsvdm() {
+    // The same tall and wide shapes as CheckTsvdm, so a mix-up between m and p
+    // in the reconstruction would be caught.
+    const std::array<std::array<Eigen::Index, 3>, 2> shapes{
+        {{6, 4, 5}, {3, 5, 4}}};
+    std::mt19937 generator(548);
+
+    // The relative Frobenius error. The teammate set this tolerance. It is
+    // far looser than the rounding error, so it only fails on a real bug.
+    constexpr double tolerance = 1e-6;
+    for (const auto &[m, p, n] : shapes) {
+        const tensor_compression::Tensor tensor =
+            RandomTensor({m, p, n}, generator);
+        const Eigen::MatrixXd transform = RandomOrthogonal(n, generator);
+        for (const bool economy : {false, true}) {
+            const tensor_compression::TsvdmFactors factors =
+                tensor_compression::Tsvdm(tensor, transform, {}, false,
+                                          economy);
+            const tensor_compression::Tensor reconstructed =
+                tensor_compression::ReconstructFromTsvdm(factors, transform);
+            if (reconstructed.dimensions != tensor.dimensions) {
+                throw std::runtime_error(
+                    "Reconstructed tensor has the wrong dimensions.");
+            }
+            const double error =
+                (reconstructed.values - tensor.values).norm() /
+                tensor.values.norm();
+            std::cout << "Reconstruction of a random " << m << "x" << p << "x"
+                      << n << " tensor (" << (economy ? "economy" : "full")
+                      << ")\nRelative error: " << error << "\n";
+            if (error > tolerance) {
+                throw std::runtime_error(
+                    "star-M SVD reconstruction verification failed.");
+            }
+        }
+    }
+    std::cout << "star-M SVD reconstruction verification passed.\n\n";
+}
+
+/**
+ * Checks that the star-M SVD with the identity transform reduces to an
+ * ordinary matrix SVD of each frontal slice. Multiplying by the identity
+ * changes nothing, so every slice of U, S, and V must match Eigen's SVD of
+ * the corresponding slice of the original tensor, in both full and economy
+ * form. Both run the same algorithm on the same matrix, so the singular
+ * vectors have the same signs and can be compared directly.
+ *
+ * @throws std::runtime_error if any factor slice differs from the matrix SVD
+ * by more than the tolerance.
+ * @throws std::bad_alloc if there is not enough memory for the tensors or
+ * temporary data.
+ */
+static void CheckIdentityTsvdm() {
+    const std::array<std::array<Eigen::Index, 3>, 2> shapes{
+        {{6, 4, 5}, {3, 5, 4}}};
+    std::mt19937 generator(548);
+
+    // Multiplying by the identity is exact in floating point, so any
+    // difference beyond rounding means the slices were mixed up.
+    constexpr double tolerance = 1e-12;
+    for (const auto &[m, p, n] : shapes) {
+        const tensor_compression::Tensor tensor =
+            RandomTensor({m, p, n}, generator);
+        const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n, n);
+        for (const bool economy : {false, true}) {
+            const tensor_compression::TsvdmFactors factors =
+                tensor_compression::Tsvdm(tensor, identity, {}, false, economy);
+            const std::uint32_t options =
+                economy ? (Eigen::ComputeThinU | Eigen::ComputeThinV)
+                        : (Eigen::ComputeFullU | Eigen::ComputeFullV);
+            double error = 0.0;
+            for (Eigen::Index i = 0; i < n; ++i) {
+                const Eigen::BDCSVD<Eigen::MatrixXd> svd(
+                    tensor_compression::FrontalSlice(tensor, i), options);
+                const Eigen::MatrixXd s =
+                    tensor_compression::FrontalSlice(factors.s, i);
+                Eigen::MatrixXd expectedS = Eigen::MatrixXd::Zero(s.rows(),
+                                                                  s.cols());
+                expectedS.diagonal() = svd.singularValues();
+                error = std::max(
+                    {error,
+                     (tensor_compression::FrontalSlice(factors.u, i) -
+                      svd.matrixU())
+                         .norm(),
+                     (s - expectedS).norm(),
+                     (tensor_compression::FrontalSlice(factors.v, i) -
+                      svd.matrixV())
+                         .norm()});
+            }
+            std::cout << "Identity-transform star-M SVD of a random " << m
+                      << "x" << p << "x" << n << " tensor ("
+                      << (economy ? "economy" : "full")
+                      << ")\nLargest difference from the slice SVDs: "
+                      << error << "\n";
+            if (error > tolerance) {
+                throw std::runtime_error(
+                    "Identity-transform star-M SVD verification failed.");
+            }
+        }
+    }
+    std::cout << "Identity-transform star-M SVD verification passed.\n\n";
+}
+
+/**
  * Helper to recursively print the metadata of a NetCDF group and its children.
  */
 static void PrintGroupMetadata(const netCDF::NcGroup &group,
@@ -546,6 +662,8 @@ int main(int argc, char *argv[]) {
         PrintIdentityMode3Product();
         CheckTsvdm();
         CheckTruncateTsvdm();
+        CheckReconstructFromTsvdm();
+        CheckIdentityTsvdm();
         const std::filesystem::path directory = argc == 2 ? argv[1] : "data";
         return PrintDataMetadata(directory) ? EXIT_SUCCESS : EXIT_FAILURE;
     } catch (const std::exception &error) {

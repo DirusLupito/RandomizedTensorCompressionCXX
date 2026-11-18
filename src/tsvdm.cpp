@@ -8,8 +8,31 @@
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 namespace tensor_compression {
+
+void ValidateTsvdmFactors(const TsvdmFactors &factors) {
+    for (const Tensor *factor : {&factors.u, &factors.s, &factors.v}) {
+        ValidateTensor(*factor);
+        if (factor->dimensions.size() != 3) {
+            throw std::invalid_argument(
+                "star-M SVD factors must each have exactly three axes.");
+        }
+    }
+    const std::vector<Eigen::Index> &u = factors.u.dimensions;
+    const std::vector<Eigen::Index> &s = factors.s.dimensions;
+    const std::vector<Eigen::Index> &v = factors.v.dimensions;
+    if (u[1] != s[0] || v[1] != s[1]) {
+        throw std::invalid_argument(
+            "star-M SVD factor shapes do not fit together: U must have as many "
+            "columns as S has rows, and V as many columns as S has columns.");
+    }
+    if (u[2] != s[2] || v[2] != s[2]) {
+        throw std::invalid_argument(
+            "star-M SVD factors must have the same number of frontal slices.");
+    }
+}
 
 TsvdmFactors Tsvdm(const Tensor &tensor, const Eigen::MatrixXd &transform,
                    std::span<const Eigen::Index> ranks, bool transformDomain,

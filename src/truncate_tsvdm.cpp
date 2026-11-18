@@ -7,45 +7,9 @@
 
 namespace tensor_compression {
 
-/**
- * Checks that star-M SVD factors are valid tensors whose shapes fit together,
- * so that U(:, :, i) * S(:, :, i) * V(:, :, i)^T is defined for every slice.
- * MATLAB reports a mismatch as an indexing or assignment error partway through
- * truncateTSVDM. This check reports it before any entries are copied.
- *
- * @param factors The factors to check. They are not modified.
- *
- * @throws std::invalid_argument if a factor's dimensions or number of entries
- * are invalid, if a factor does not have exactly three dimensions, if U's
- * column count differs from S's row count, if V's column count differs from
- * S's column count, or if the factors have different numbers of slices.
- * @throws std::length_error if a factor's storage size cannot be represented.
- */
-static void ValidateFactors(const TsvdmFactors &factors) {
-    for (const Tensor *factor : {&factors.u, &factors.s, &factors.v}) {
-        ValidateTensor(*factor);
-        if (factor->dimensions.size() != 3) {
-            throw std::invalid_argument(
-                "star-M SVD factors must each have exactly three axes.");
-        }
-    }
-    const std::vector<Eigen::Index> &u = factors.u.dimensions;
-    const std::vector<Eigen::Index> &s = factors.s.dimensions;
-    const std::vector<Eigen::Index> &v = factors.v.dimensions;
-    if (u[1] != s[0] || v[1] != s[1]) {
-        throw std::invalid_argument(
-            "star-M SVD factor shapes do not fit together: U must have as many "
-            "columns as S has rows, and V as many columns as S has columns.");
-    }
-    if (u[2] != s[2] || v[2] != s[2]) {
-        throw std::invalid_argument(
-            "star-M SVD factors must have the same number of frontal slices.");
-    }
-}
-
 TsvdmFactors TruncateTsvdm(const TsvdmFactors &factors,
                            std::span<const Eigen::Index> ranks) {
-    ValidateFactors(factors);
+    ValidateTsvdmFactors(factors);
 
     // Get the tensor dimensions. MATLAB reads m and p from size(S), which only
     // agrees with U and V for full factors. Economy S slices are

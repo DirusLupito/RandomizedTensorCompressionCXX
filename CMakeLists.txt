@@ -34,6 +34,8 @@ add_executable(tensor_compression
     src/tensor.hpp
     src/permute.cpp
     src/permute.hpp
+    src/reconstruct_from_tsvdm.cpp
+    src/reconstruct_from_tsvdm.hpp
     src/tmprod.cpp
     src/tmprod.hpp
     src/mode3_tensor_matrix_product.hpp
