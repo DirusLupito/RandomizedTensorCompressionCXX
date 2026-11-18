@@ -6,6 +6,7 @@
 #include <Eigen/SVD>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -35,8 +36,9 @@ void ValidateTsvdmFactors(const TsvdmFactors &factors) {
 }
 
 TsvdmFactors Tsvdm(const Tensor &tensor, const Eigen::MatrixXd &transform,
+                   AsyncParallelForDriver &driver,
                    std::span<const Eigen::Index> ranks, bool transformDomain,
-                   bool economy) {
+                   bool economy, std::size_t batchSize) {
     ValidateTensor(tensor);
     if (tensor.dimensions.size() > 3) {
         throw std::invalid_argument(
@@ -75,25 +77,34 @@ TsvdmFactors Tsvdm(const Tensor &tensor, const Eigen::MatrixXd &transform,
     factors.v.dimensions = {p, vColumns, n};
     factors.v.values.resize(ElementCount(factors.v.dimensions));
 
-    // Decompose each transformed slice on its own. This is the loop MATLAB's
-    // TSVDM runs with parfor, and the main target for parallelism, since no
-    // iteration reads or writes another iteration's slice. BDCSVD uses the
-    // divide-and-conquer approach, like the LAPACK routine behind MATLAB's
-    // svd, and returns the singular values in descending order.
+    // Decompose each transformed slice on its own, in parallel. This is the
+    // loop MATLAB's TSVDM runs with parfor. No locking is needed, because
+    // slice i only reads its own slice of the transformed tensor and only
+    // writes its own slices of U, S, and V, which are separate contiguous
+    // blocks of memory. The factors were allocated above, so no thread
+    // resizes them. BDCSVD uses the divide-and-conquer approach, like the
+    // LAPACK routine behind MATLAB's svd, and returns the singular values in
+    // descending order.
     const std::uint32_t options =
         economy ? (Eigen::ComputeThinU | Eigen::ComputeThinV)
                 : (Eigen::ComputeFullU | Eigen::ComputeFullV);
-    for (Eigen::Index i = 0; i < n; ++i) {
-        const Eigen::BDCSVD<Eigen::MatrixXd> svd(FrontalSlice(transformed, i),
-                                                 options);
-        if (svd.info() != Eigen::Success) {
-            throw std::runtime_error(
-                "Eigen failed to compute a frontal slice SVD.");
-        }
-        FrontalSlice(factors.u, i) = svd.matrixU();
-        FrontalSlice(factors.s, i).diagonal() = svd.singularValues();
-        FrontalSlice(factors.v, i) = svd.matrixV();
-    }
+    driver.ParallelFor(
+        static_cast<std::size_t>(n), batchSize,
+        [&transformed, &factors, options](std::size_t begin, std::size_t end,
+                                          std::uint32_t) {
+            for (std::size_t slice = begin; slice < end; ++slice) {
+                const Eigen::Index i = static_cast<Eigen::Index>(slice);
+                const Eigen::BDCSVD<Eigen::MatrixXd> svd(
+                    FrontalSlice(transformed, i), options);
+                if (svd.info() != Eigen::Success) {
+                    throw std::runtime_error(
+                        "Eigen failed to compute a frontal slice SVD.");
+                }
+                FrontalSlice(factors.u, i) = svd.matrixU();
+                FrontalSlice(factors.s, i).diagonal() = svd.singularValues();
+                FrontalSlice(factors.v, i) = svd.matrixV();
+            }
+        });
 
     // Only truncate if ranks are given. Truncation happens in the transform
     // domain, where each slice's leading triples give its best approximation.

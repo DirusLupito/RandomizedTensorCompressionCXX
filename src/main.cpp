@@ -14,9 +14,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 // NOTE FOR ERIK OR ERIK'S CLOD AGENT: This file is but a temporary test harness
@@ -196,13 +199,15 @@ static bool SameTensor(const tensor_compression::Tensor &left,
  * The original domain factors must return to the transform domain factors
  * when multiplied by M, since M undoes the M^T that produced them.
  *
+ * @param driver The driver that runs the slice SVDs in parallel.
+ *
  * @throws std::runtime_error if a factor has the wrong dimensions, if the
  * slices are not reproduced, if the singular values are out of order, or if
  * the two domains disagree.
  * @throws std::bad_alloc if there is not enough memory for the tensors or
  * temporary data.
  */
-static void CheckTsvdm() {
+static void CheckTsvdm(tensor_compression::AsyncParallelForDriver &driver) {
     // A tall shape (m > p) and a wide shape (m < p), so the full and economy
     // factors have different sizes, and a mix-up between m and p is caught.
     const std::array<std::array<Eigen::Index, 3>, 2> shapes{
@@ -221,9 +226,10 @@ static void CheckTsvdm() {
 
         for (const bool economy : {false, true}) {
             const tensor_compression::TsvdmFactors inTransform =
-                tensor_compression::Tsvdm(tensor, transform, {}, true, economy);
+                tensor_compression::Tsvdm(tensor, transform, driver, {}, true,
+                                          economy);
             const tensor_compression::TsvdmFactors inOriginal =
-                tensor_compression::Tsvdm(tensor, transform, {}, false,
+                tensor_compression::Tsvdm(tensor, transform, driver, {}, false,
                                           economy);
 
             // Full factors are m x m, m x p, and p x p per slice. Economy
@@ -333,13 +339,16 @@ static void CheckTruncatedShapes(const tensor_compression::TsvdmFactors &factors
  * Tsvdm must give exactly the same factors as calling TruncateTsvdm on its
  * untruncated output. Ranks that do not fit the tensor must be rejected.
  *
+ * @param driver The driver that runs the slice SVDs in parallel.
+ *
  * @throws std::runtime_error if truncated factors have the wrong dimensions or
  * entries, if Tsvdm's truncation disagrees with TruncateTsvdm, or if invalid
  * ranks are accepted.
  * @throws std::bad_alloc if there is not enough memory for the tensors or
  * temporary data.
  */
-static void CheckTruncateTsvdm() {
+static void
+CheckTruncateTsvdm(tensor_compression::AsyncParallelForDriver &driver) {
     // The same tall and wide shapes as CheckTsvdm, so that reading m and p
     // from the wrong factor would be caught for economy factors.
     const std::array<std::array<Eigen::Index, 3>, 2> shapes{
@@ -367,7 +376,8 @@ static void CheckTruncateTsvdm() {
 
         for (const bool economy : {false, true}) {
             const tensor_compression::TsvdmFactors untruncated =
-                tensor_compression::Tsvdm(tensor, transform, {}, true, economy);
+                tensor_compression::Tsvdm(tensor, transform, driver, {}, true,
+                                          economy);
             for (const std::vector<Eigen::Index> &ranks : rankLists) {
                 const tensor_compression::TsvdmFactors truncated =
                     tensor_compression::TruncateTsvdm(untruncated, ranks);
@@ -403,18 +413,18 @@ static void CheckTruncateTsvdm() {
                 // truncation must agree bit for bit. In the original domain,
                 // only the shapes are checked until reconstruction exists.
                 const tensor_compression::TsvdmFactors viaTsvdm =
-                    tensor_compression::Tsvdm(tensor, transform, ranks, true,
-                                              economy);
+                    tensor_compression::Tsvdm(tensor, transform, driver, ranks,
+                                              true, economy);
                 if (!SameTensor(viaTsvdm.u, truncated.u) ||
                     !SameTensor(viaTsvdm.s, truncated.s) ||
                     !SameTensor(viaTsvdm.v, truncated.v)) {
                     throw std::runtime_error(
                         "Tsvdm truncation disagrees with TruncateTsvdm.");
                 }
-                CheckTruncatedShapes(tensor_compression::Tsvdm(tensor,
-                                                               transform, ranks,
-                                                               false, economy),
-                                     m, p, r, n);
+                CheckTruncatedShapes(
+                    tensor_compression::Tsvdm(tensor, transform, driver, ranks,
+                                              false, economy),
+                    m, p, r, n);
             }
             std::cout << "Truncated star-M SVD of a random " << m << "x" << p
                       << "x" << n << " tensor ("
@@ -430,7 +440,8 @@ static void CheckTruncateTsvdm() {
         std::vector<Eigen::Index> tooLarge(count, 1);
         tooLarge.back() = q + 1;
         const tensor_compression::TsvdmFactors untruncated =
-            tensor_compression::Tsvdm(tensor, transform, {}, true, false);
+            tensor_compression::Tsvdm(tensor, transform, driver, {}, true,
+                                      false);
         for (const std::vector<Eigen::Index> *ranks :
              {&tooFew, &negative, &tooLarge}) {
             bool truncateRejected = false;
@@ -441,8 +452,8 @@ static void CheckTruncateTsvdm() {
             }
             bool tsvdmRejected = false;
             try {
-                tensor_compression::Tsvdm(tensor, transform, *ranks, true,
-                                          false);
+                tensor_compression::Tsvdm(tensor, transform, driver, *ranks,
+                                          true, false);
             } catch (const std::invalid_argument &) {
                 tsvdmRejected = true;
             }
@@ -462,12 +473,15 @@ static void CheckTruncateTsvdm() {
  * that multiply zeros in S, so they must reconstruct the tensor as well as
  * full factors do.
  *
+ * @param driver The driver that runs the slice SVDs in parallel.
+ *
  * @throws std::runtime_error if the reconstruction has the wrong dimensions or
  * differs from the original tensor by more than the tolerance.
  * @throws std::bad_alloc if there is not enough memory for the tensors or
  * temporary data.
  */
-static void CheckReconstructFromTsvdm() {
+static void
+CheckReconstructFromTsvdm(tensor_compression::AsyncParallelForDriver &driver) {
     // The same tall and wide shapes as CheckTsvdm, so a mix-up between m and p
     // in the reconstruction would be caught.
     const std::array<std::array<Eigen::Index, 3>, 2> shapes{
@@ -483,7 +497,7 @@ static void CheckReconstructFromTsvdm() {
         const Eigen::MatrixXd transform = RandomOrthogonal(n, generator);
         for (const bool economy : {false, true}) {
             const tensor_compression::TsvdmFactors factors =
-                tensor_compression::Tsvdm(tensor, transform, {}, false,
+                tensor_compression::Tsvdm(tensor, transform, driver, {}, false,
                                           economy);
             const tensor_compression::Tensor reconstructed =
                 tensor_compression::ReconstructFromTsvdm(factors, transform);
@@ -514,12 +528,15 @@ static void CheckReconstructFromTsvdm() {
  * form. Both run the same algorithm on the same matrix, so the singular
  * vectors have the same signs and can be compared directly.
  *
+ * @param driver The driver that runs the slice SVDs in parallel.
+ *
  * @throws std::runtime_error if any factor slice differs from the matrix SVD
  * by more than the tolerance.
  * @throws std::bad_alloc if there is not enough memory for the tensors or
  * temporary data.
  */
-static void CheckIdentityTsvdm() {
+static void
+CheckIdentityTsvdm(tensor_compression::AsyncParallelForDriver &driver) {
     const std::array<std::array<Eigen::Index, 3>, 2> shapes{
         {{6, 4, 5}, {3, 5, 4}}};
     std::mt19937 generator(548);
@@ -533,7 +550,8 @@ static void CheckIdentityTsvdm() {
         const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n, n);
         for (const bool economy : {false, true}) {
             const tensor_compression::TsvdmFactors factors =
-                tensor_compression::Tsvdm(tensor, identity, {}, false, economy);
+                tensor_compression::Tsvdm(tensor, identity, driver, {}, false,
+                                          economy);
             const std::uint32_t options =
                 economy ? (Eigen::ComputeThinU | Eigen::ComputeThinV)
                         : (Eigen::ComputeFullU | Eigen::ComputeFullV);
@@ -568,6 +586,106 @@ static void CheckIdentityTsvdm() {
         }
     }
     std::cout << "Identity-transform star-M SVD verification passed.\n\n";
+}
+
+/**
+ * Checks that the parallel star-M SVD gives exactly the same factors as the
+ * serial one, for several thread counts and batch sizes. Each slice's SVD is
+ * computed the same way whichever thread runs it, so any difference at all,
+ * even in the last bit, means that threads interfered with each other's
+ * slices or that a slice was skipped or computed twice. Also checks that a
+ * slice SVD failure on a worker thread reaches the caller as an exception.
+ *
+ * The thread counts include one that does not divide the number of slices and
+ * one larger than the number of slices. The batch sizes cover fully dynamic
+ * claiming (1), a small batch (2), and one contiguous block per thread, which
+ * is close to a static split. A 200-slice tensor makes the threads compete for
+ * slices many times.
+ *
+ * @throws std::runtime_error if any parallel factors differ from the serial
+ * factors, or if a slice SVD failure is not reported.
+ * @throws std::system_error if a worker thread cannot be started.
+ * @throws std::bad_alloc if there is not enough memory for the tensors or
+ * temporary data.
+ */
+static void CheckParallelTsvdm() {
+    const std::array<std::array<Eigen::Index, 3>, 3> shapes{
+        {{6, 4, 5}, {3, 5, 4}, {8, 6, 200}}};
+    std::mt19937 generator(548);
+
+    // The serial reference runs every slice on the calling thread.
+    tensor_compression::AsyncParallelForDriver serial(1);
+    std::vector<std::unique_ptr<tensor_compression::AsyncParallelForDriver>>
+        parallel;
+    for (const std::uint32_t concurrency : {2U, 3U, 8U}) {
+        parallel.push_back(
+            std::make_unique<tensor_compression::AsyncParallelForDriver>(
+                concurrency));
+    }
+
+    for (const auto &[m, p, n] : shapes) {
+        const tensor_compression::Tensor tensor =
+            RandomTensor({m, p, n}, generator);
+        const Eigen::MatrixXd transform = RandomOrthogonal(n, generator);
+        const std::vector<Eigen::Index> noRanks;
+        const std::vector<Eigen::Index> uniformRanks(
+            static_cast<std::size_t>(n), 2);
+        std::size_t runs = 0;
+        for (const bool economy : {false, true}) {
+            for (const std::vector<Eigen::Index> *ranks :
+                 {&noRanks, &uniformRanks}) {
+                for (const bool transformDomain : {true, false}) {
+                    const tensor_compression::TsvdmFactors expected =
+                        tensor_compression::Tsvdm(tensor, transform, serial,
+                                                  *ranks, transformDomain,
+                                                  economy);
+                    for (const auto &driver : parallel) {
+                        const std::size_t count = static_cast<std::size_t>(n);
+                        const std::size_t threads = driver->GetConcurrency();
+                        const std::size_t block =
+                            (count + threads - 1) / threads;
+                        for (const std::size_t batchSize :
+                             {std::size_t{1}, std::size_t{2}, block}) {
+                            const tensor_compression::TsvdmFactors actual =
+                                tensor_compression::Tsvdm(
+                                    tensor, transform, *driver, *ranks,
+                                    transformDomain, economy, batchSize);
+                            if (!SameTensor(actual.u, expected.u) ||
+                                !SameTensor(actual.s, expected.s) ||
+                                !SameTensor(actual.v, expected.v)) {
+                                throw std::runtime_error(
+                                    "Parallel star-M SVD differs from the "
+                                    "serial result.");
+                            }
+                            ++runs;
+                        }
+                    }
+                }
+            }
+        }
+        std::cout << "Parallel star-M SVD of a random " << m << "x" << p << "x"
+                  << n << " tensor: " << runs
+                  << " runs on 2, 3, and 8 threads match the serial result "
+                     "bit for bit\n";
+    }
+
+    // A NaN makes Eigen report invalid input for the slice SVDs. The mode-3
+    // product spreads it to every slice, so the worker threads fail too, and
+    // the first failure must be rethrown on the calling thread.
+    tensor_compression::Tensor invalid = RandomTensor({8, 6, 200}, generator);
+    invalid.values(0) = std::numeric_limits<double>::quiet_NaN();
+    bool failureReported = false;
+    try {
+        tensor_compression::Tsvdm(invalid, RandomOrthogonal(200, generator),
+                                  *parallel.back());
+    } catch (const std::runtime_error &) {
+        failureReported = true;
+    }
+    if (!failureReported) {
+        throw std::runtime_error(
+            "A failed slice SVD on a worker thread was not reported.");
+    }
+    std::cout << "Parallel star-M SVD verification passed.\n\n";
 }
 
 /**
@@ -660,10 +778,15 @@ int main(int argc, char *argv[]) {
         }
         PrintIdentitySvd();
         PrintIdentityMode3Product();
-        CheckTsvdm();
-        CheckTruncateTsvdm();
-        CheckReconstructFromTsvdm();
-        CheckIdentityTsvdm();
+        // One driver for every check, using all hardware threads, so the
+        // checks below also run on the parallel path.
+        tensor_compression::AsyncParallelForDriver driver(
+            std::max(1U, std::thread::hardware_concurrency()));
+        CheckTsvdm(driver);
+        CheckTruncateTsvdm(driver);
+        CheckReconstructFromTsvdm(driver);
+        CheckIdentityTsvdm(driver);
+        CheckParallelTsvdm();
         const std::filesystem::path directory = argc == 2 ? argv[1] : "data";
         return PrintDataMetadata(directory) ? EXIT_SUCCESS : EXIT_FAILURE;
     } catch (const std::exception &error) {
