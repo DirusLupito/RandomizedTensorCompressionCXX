@@ -11,8 +11,8 @@ namespace tensor_compression::experiments {
 class FlowBenchmark : public Experiment {
 public:
     /**
-     * Loads the tensor once, constructs the DCT, and records five independent
-     * wall-clock measurements per configuration. Progress is flushed to a
+     * Loads the tensor once, constructs the DCT, and records one wall-clock
+     * measurement per configuration. Progress is flushed to a
      * partial CSV which is published under its final name on success.
      * @throws std::exception if input, pool creation, decomposition or output
      * fails.

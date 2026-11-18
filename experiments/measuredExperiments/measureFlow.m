@@ -34,7 +34,7 @@ end
 end
 
 function runSweep(dataset, T, M, outputDir, execution, threads)
-% Record each of five independent calls. Closing the partial file before
+% Record one call per setting. Closing the partial file before
 % renaming it keeps the Python collector from plotting an interrupted sweep.
 [m,p,n] = size(T);
 csv = fullfile(outputDir, sprintf('%s_matlab_%s_%d.csv', dataset, execution, threads));
@@ -50,31 +50,28 @@ if strcmp(execution,'serial')
 else
     decompose = @TSVDM;
 end
-for c = 1:min(m,p)
+maxRank = min(m,p);
+for c = unique([1, max(1,floor(maxRank/2)), maxRank])
     rho = repmat(c,n,1);
-    for rep = 1:5
-        start = tic;
-        [U,S,V] = decompose(T,M,true,'econ');
-        [Ut,St,Vt] = truncateEconomy(U,S,V,rho);
-        seconds = toc(start);
-        fprintf(fid,'%s,matlab,scaling,TSVDM,%s,%d,,%d,,%d,%.17g,%d,%d,%d\n', ...
-            dataset,execution,threads,c,rep,seconds,m,p,n);
-        clear U S V Ut St Vt
-    end
+    start = tic;
+    [U,S,V] = decompose(T,M,true,'econ');
+    [Ut,St,Vt] = truncateEconomy(U,S,V,rho);
+    seconds = toc(start);
+    fprintf(fid,'%s,matlab,scaling,TSVDM,%s,%d,,%d,,1,%.17g,%d,%d,%d\n', ...
+        dataset,execution,threads,c,seconds,m,p,n);
+    clear U S V Ut St Vt
 end
 for gamma = [0.9 0.99 0.999 0.9999]
-    for rep = 1:5
-        start = tic;
-        if strcmp(execution,'serial')
-            [U,S,V,rho] = serialTsvdm2(T,M,gamma);
-        else
-            [U,S,V,rho] = TSVDM2(T,M,gamma,true,'econ');
-        end
-        seconds = toc(start);
-        fprintf(fid,'%s,matlab,scaling,TSVDM2,%s,%d,,,%.4g,%d,%.17g,%d,%d,%d\n', ...
-            dataset,execution,threads,gamma,rep,seconds,m,p,n);
-        clear U S V rho
+    start = tic;
+    if strcmp(execution,'serial')
+        [U,S,V,rho] = serialTsvdm2(T,M,gamma);
+    else
+        [U,S,V,rho] = TSVDM2(T,M,gamma,true,'econ');
     end
+    seconds = toc(start);
+    fprintf(fid,'%s,matlab,scaling,TSVDM2,%s,%d,,,%.4g,1,%.17g,%d,%d,%d\n', ...
+        dataset,execution,threads,gamma,seconds,m,p,n);
+    clear U S V rho
 end
 clear closer
 movefile(partial,csv,'f');

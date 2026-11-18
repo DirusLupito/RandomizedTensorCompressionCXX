@@ -81,8 +81,9 @@ def run_matlab(data, output, mode, session):
 
 
 def collect(output):
-    """Average the five trials and match each configuration to its serial time."""
+    """Match each setting to its serial time, averaging historical five-trial CSVs."""
     tables = []
+    keys = [column for column in COLUMNS if column not in ("repeat", "seconds")]
     for dataset in DATASETS:
         paths = list(output.glob(f"{dataset}_matlab_*.csv"))
         paths += list(output.glob(f"{dataset}_cpp_*.csv"))
@@ -90,19 +91,19 @@ def collect(output):
             table = pd.read_csv(path)
             if list(table.columns) != COLUMNS or table.empty or not table.dataset.eq(dataset).all():
                 raise ValueError(f"Unexpected timing schema or dataset in {path}")
+            repeats = 1 if table["repeat"].eq(1).all() else 5
+            if (not table["repeat"].isin(range(1, repeats + 1)).all()
+                    or not table.groupby(keys, dropna=False).size().eq(repeats).all()):
+                raise ValueError(f"Expected {repeats} timing(s) per configuration in {path}.")
             tables.append(table)
     if not tables:
         raise ValueError(f"No completed timing CSVs found in {output}")
     raw = pd.concat(tables, ignore_index=True)
     if not np.isfinite(raw.seconds).all() or not raw.seconds.gt(0).all():
         raise ValueError("Every elapsed time must be finite and positive.")
-    keys = [column for column in COLUMNS if column not in ("repeat", "seconds")]
-    grouped = raw.groupby(keys, dropna=False)
-    # Five distinct repetitions make a complete configuration. Avoid turning
-    # a truncated or duplicated manual CSV into a misleading speedup.
-    if not raw["repeat"].isin(range(1, 6)).all() or not grouped["repeat"].nunique().eq(5).all() or not grouped.size().eq(5).all():
-        raise ValueError("Expected exactly one timing for each repetition 1 through 5.")
-    summary = grouped.seconds.mean().reset_index(name="mean_seconds")
+    if raw.duplicated(keys + ["repeat"]).any():
+        raise ValueError("Duplicate timing for the same configuration and repetition.")
+    summary = raw.groupby(keys, dropna=False).seconds.mean().reset_index(name="mean_seconds")
     serial = summary.loc[(summary.sweep == "scaling") & (summary.execution == "serial")
                          & (summary.threads == 1), BASE_KEY + ["mean_seconds"]]
     serial = serial.rename(columns={"mean_seconds": "serial_seconds"})
@@ -148,9 +149,10 @@ def plot(summary, folder):
         languages = sorted(scaling.language.unique())
         parameter = "c" if algorithm == "TSVDM" else "gamma"
         values = sorted(scaling[parameter].unique())
-        # Show representative ranks on the thread-count figure. The companion
-        # rank figure uses every measured c and one curve per thread count.
-        shown = sorted({values[0], 8, values[-1]}.intersection(values)) if parameter == "c" else values
+        # Also keep the thread-count plot readable for historical full-rank sweeps.
+        shown = values
+        if parameter == "c" and len(values) > 3:
+            shown = sorted({values[0], max(1, values[-1] // 2), values[-1]}.intersection(values))
         for metric, ylabel in METRICS:
             fig, panels = plt.subplots(1, len(languages), squeeze=False, sharey=True,
                                        figsize=(5 * len(languages), 3.8), layout="constrained")

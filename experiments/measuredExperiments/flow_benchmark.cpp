@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numbers>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -112,8 +113,10 @@ void FlowBenchmark::RunExperiment() const {
                                        stem == "tangaroa");
     const auto &dims = tensor.dimensions;
     const Eigen::Index maxRank = std::min(dims[0], dims[1]);
-    if (batches && maxRank < 8) {
-        throw std::runtime_error("The scheduler sweep requires slice rank 8.");
+    const Eigen::Index halfRank = std::max<Eigen::Index>(1, maxRank / 2);
+    std::set<Eigen::Index> sweepRanks{halfRank};
+    if (!batches) {
+        sweepRanks.insert({1, maxRank});
     }
     const Eigen::MatrixXd transform = DctMatrix(dims[2]);
 
@@ -136,7 +139,7 @@ void FlowBenchmark::RunExperiment() const {
                "c,gamma,repeat,seconds,m,p,n\n";
 
     // Each driver starts before the clock. With one thread the caller runs
-    // the serial loop. Every repetition computes all slice SVDs from scratch.
+    // the serial loop. Time one decomposition per setting.
     for (const std::uint32_t threads : {1U, 2U, 4U, 8U, 16U, 32U}) {
         if (batches && threads != 32) {
             continue;
@@ -150,7 +153,6 @@ void FlowBenchmark::RunExperiment() const {
                       << ", batch=" << batch << " -> " << partial << std::endl;
             const auto record =
                 [&](std::string_view algorithm, Eigen::Index c, double gamma,
-                    int repetition,
                     std::chrono::steady_clock::duration duration) {
                     timings << stem << ",cpp," << sweep << ',' << algorithm
                             << ',' << (threads == 1 ? "serial" : "parallel")
@@ -162,34 +164,28 @@ void FlowBenchmark::RunExperiment() const {
                     if (gamma) {
                         timings << std::setprecision(6) << gamma;
                     }
-                    timings << ',' << repetition << ',' << std::setprecision(17)
+                    timings << ",1," << std::setprecision(17)
                             << std::chrono::duration<double>(duration).count()
                             << ',' << dims[0] << ',' << dims[1] << ','
                             << dims[2] << '\n'
                             << std::flush;
                 };
-            for (Eigen::Index c = batches ? 8 : 1; c <= (batches ? 8 : maxRank);
-                 ++c) {
+            for (const Eigen::Index c : sweepRanks) {
                 const std::vector<Eigen::Index> ranks(dims[2], c);
-                for (int repetition = 1; repetition <= 5; ++repetition) {
-                    const auto start = std::chrono::steady_clock::now();
-                    const auto factors = Tsvdm(tensor, transform, driver, ranks,
-                                               true, true, batch);
-                    record("TSVDM", c, 0, repetition,
-                           std::chrono::steady_clock::now() - start);
-                }
+                const auto start = std::chrono::steady_clock::now();
+                const auto factors =
+                    Tsvdm(tensor, transform, driver, ranks, true, true, batch);
+                record("TSVDM", c, 0, std::chrono::steady_clock::now() - start);
             }
             for (const double gamma : {0.9, 0.99, 0.999, 0.9999}) {
                 if (batches && gamma != 0.99) {
                     continue;
                 }
-                for (int repetition = 1; repetition <= 5; ++repetition) {
-                    const auto start = std::chrono::steady_clock::now();
-                    const auto result = Tsvdm2(tensor, transform, driver, gamma,
-                                               true, true, batch);
-                    record("TSVDM2", 0, gamma, repetition,
-                           std::chrono::steady_clock::now() - start);
-                }
+                const auto start = std::chrono::steady_clock::now();
+                const auto result =
+                    Tsvdm2(tensor, transform, driver, gamma, true, true, batch);
+                record("TSVDM2", 0, gamma,
+                       std::chrono::steady_clock::now() - start);
             }
         }
     }

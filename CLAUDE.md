@@ -49,9 +49,9 @@ OpenMP, pthreads, or Win32 threads.
   Windows 11 Pro. The code should also build and run on Linux.
 - Datasets are NetCDF files from the ETH Zürich CGL scientific data collection.
   See `data/Data Sources.txt`. Data files (`*.nc`, `*.mat`) are gitignored.
-- Each configuration is averaged over 5 runs. Algorithm 1 sweeps a uniform
-  truncation rank `k`. Algorithm 2 sweeps
-  `gamma in {0.9, 0.99, 0.999, 0.9999, 0.99999, 0.999999}`.
+- Time each configuration once. Algorithm 1 measures uniform truncation
+  ranks 1, half the maximum (rounded down), and the maximum. Algorithm 2
+  measures `gamma in {0.9, 0.99, 0.999, 0.9999}`.
 - Baseline: the existing serial and `parfor` MATLAB implementations.
 
 When porting, match MATLAB's semantics, including column-major layout and

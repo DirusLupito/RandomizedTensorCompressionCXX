@@ -70,22 +70,25 @@ takes the row counts from the economy U and V factors so it can handle
 rectangular slices. The serial TSVDM2 baseline applies TeBaC's global energy
 cutoff to the output of `TSVDMserial`.
 
-- **TSVDM** gives every slice the same rank `c` and measures every integer
-  from 1 through the smaller frontal-slice dimension, as in TeBaC's
-  `compressionComparison.m`.
+- **TSVDM** measures rank 1, half the maximum rank (rounded down), and the
+  maximum rank, which is the smaller frontal-slice dimension. Only distinct
+  positive ranks are timed. Jungtelziemniak2d uses 1, 100, and 200.
+  Boussinesq uses 1, 225, and 450. Tangaroa uses 1, 100, and 201.
 - **TSVDM2** measures retained energy fractions 0.9, 0.99, 0.999, and 0.9999.
 - **C++ scaling** uses the serial loop and then 2, 4, 8, 16, and 32 threads,
   with one slice per scheduler batch.
 - **C++ scheduler** uses 32 threads and batches of 1, 2, 4, 8, 16, and 32
-  slices, with `c = 8` for TSVDM and `gamma = 0.99` for TSVDM2.
+  slices, with the middle rank for TSVDM and `gamma = 0.99` for TSVDM2.
 
 Results go in `build/measuredExperiments/`. Each configuration contributes
-five wall-clock timings to `timings.csv`. The means, speedups, and efficiencies
+one wall-clock timing to `timings.csv`. The runtimes, speedups, and efficiencies
 go in `summary.csv`, and the runtime, speedup, and efficiency plots go in
-`plots/` as PNG and PDF files. Speedup is the matching serial mean divided
-by the parallel mean, using the same dataset, language, algorithm, and
+`plots/` as PNG and PDF files. Speedup is the matching serial time divided
+by the parallel time, using the same dataset, language, algorithm, and
 truncation setting. Efficiency is 100 times speedup divided by the thread
 or worker count. The scheduler plots use the same serial baseline.
+The collector also accepts completed CSVs from the earlier five-trial
+protocol and averages their repetitions.
 
 The runner accepts `--data-dir` and `--output`. Each MATLAB function accepts
 the same directories as optional positional arguments. For manual C++ runs,
