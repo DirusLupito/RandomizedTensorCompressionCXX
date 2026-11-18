@@ -32,9 +32,11 @@ python experiments/measuredExperiments/run_measured.py
 
 The runner builds the optimized C++ executable, runs both planar datasets,
 and looks for a shared MATLAB session. To include live MATLAB timings, install
-the MATLAB Engine for your Python and MATLAB release. In MATLAB, put TeBaC
-on the path, choose the parallel pool you want to measure, and call
-`matlab.engine.shareEngine`. The experiments always time the serial code and
+the MATLAB Engine for your Python and MATLAB release. In MATLAB, put the provided
+TeBaC files (unzipped) on the path, choose the parallel pool you want to measure, and call
+`matlab.engine.shareEngine`. You will need a number of MATLAB toolboxes, try to
+run until you stop getting errors. The parallel computing toolbox is a definite must.
+The experiments always time the serial code and
 also time the parallel code when a pool is open. Each pool size gets its own
 CSV, so you can run the MATLAB functions again with a different pool.
 
