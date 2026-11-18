@@ -35,6 +35,11 @@ add_executable(tensor_compression
     experiments/experiment_helpers.hpp
     experiments/experiment_menu.cpp
     experiments/experiment_menu.hpp
+    experiments/measuredExperiments/flow_benchmark.cpp
+    experiments/measuredExperiments/flow_benchmark.hpp
+    experiments/measuredExperiments/jungtelziemniak2d.hpp
+    experiments/measuredExperiments/boussinesq.hpp
+    experiments/measuredExperiments/tangaroa.hpp
     experiments/full_tsvdm.cpp
     experiments/full_tsvdm.hpp
     experiments/identity_mode3_product.cpp
@@ -51,6 +56,8 @@ add_executable(tensor_compression
     experiments/reconstructed_tsvdm.hpp
     experiments/truncated_tsvdm.cpp
     experiments/truncated_tsvdm.hpp
+    experiments/tsvdm2_energy.cpp
+    experiments/tsvdm2_energy.hpp
     src/async_parallel_for_driver.cpp
     src/async_parallel_for_driver.hpp
     src/tensor.cpp
@@ -64,6 +71,8 @@ add_executable(tensor_compression
     src/mode3_tensor_matrix_product.hpp
     src/tsvdm.cpp
     src/tsvdm.hpp
+    src/tsvdm2.cpp
+    src/tsvdm2.hpp
     src/truncate_tsvdm.cpp
     src/truncate_tsvdm.hpp)
 target_include_directories(tensor_compression PRIVATE src experiments)

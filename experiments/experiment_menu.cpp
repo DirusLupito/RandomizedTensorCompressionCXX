@@ -4,10 +4,14 @@
 #include "identity_mode3_product.hpp"
 #include "identity_svd.hpp"
 #include "identity_tsvdm.hpp"
+#include "measuredExperiments/boussinesq.hpp"
+#include "measuredExperiments/jungtelziemniak2d.hpp"
+#include "measuredExperiments/tangaroa.hpp"
 #include "netcdf_metadata.hpp"
 #include "parallel_tsvdm.hpp"
 #include "reconstructed_tsvdm.hpp"
 #include "truncated_tsvdm.hpp"
+#include "tsvdm2_energy.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -33,6 +37,14 @@ bool RunExperimentMenu(const std::filesystem::path &directory) {
         std::make_unique<IdentityTsvdmExperiment>(),
         std::make_unique<ParallelTsvdmExperiment>(),
         std::make_unique<NetcdfMetadataExperiment>(directory),
+        std::make_unique<Tsvdm2EnergyExperiment>(),
+        std::make_unique<Tsvdm2EnergyExperiment>(2),
+        std::make_unique<Jungtelziemniak2dBenchmark>(directory),
+        std::make_unique<BoussinesqBenchmark>(directory),
+        std::make_unique<TangaroaBenchmark>(directory),
+        std::make_unique<Jungtelziemniak2dBenchmark>(directory, true),
+        std::make_unique<BoussinesqBenchmark>(directory, true),
+        std::make_unique<TangaroaBenchmark>(directory, true),
     };
 
     bool success = true;
