@@ -30,6 +30,8 @@ set_target_properties(netcdf_cxx4 PROPERTIES
 
 add_executable(tensor_compression
     src/main.cpp
+    src/async_parallel_for_driver.cpp
+    src/async_parallel_for_driver.hpp
     src/tensor.cpp
     src/tensor.hpp
     src/permute.cpp
