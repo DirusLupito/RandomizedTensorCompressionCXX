@@ -30,6 +30,27 @@ set_target_properties(netcdf_cxx4 PROPERTIES
 
 add_executable(tensor_compression
     src/main.cpp
+    experiments/experiment.hpp
+    experiments/experiment_helpers.cpp
+    experiments/experiment_helpers.hpp
+    experiments/experiment_menu.cpp
+    experiments/experiment_menu.hpp
+    experiments/full_tsvdm.cpp
+    experiments/full_tsvdm.hpp
+    experiments/identity_mode3_product.cpp
+    experiments/identity_mode3_product.hpp
+    experiments/identity_svd.cpp
+    experiments/identity_svd.hpp
+    experiments/identity_tsvdm.cpp
+    experiments/identity_tsvdm.hpp
+    experiments/netcdf_metadata.cpp
+    experiments/netcdf_metadata.hpp
+    experiments/parallel_tsvdm.cpp
+    experiments/parallel_tsvdm.hpp
+    experiments/reconstructed_tsvdm.cpp
+    experiments/reconstructed_tsvdm.hpp
+    experiments/truncated_tsvdm.cpp
+    experiments/truncated_tsvdm.hpp
     src/async_parallel_for_driver.cpp
     src/async_parallel_for_driver.hpp
     src/tensor.cpp
@@ -45,6 +66,7 @@ add_executable(tensor_compression
     src/tsvdm.hpp
     src/truncate_tsvdm.cpp
     src/truncate_tsvdm.hpp)
+target_include_directories(tensor_compression PRIVATE src experiments)
 target_link_libraries(tensor_compression PRIVATE Eigen3::Eigen netcdf_cxx4)
 if(NOT RTC_OUTPUT_DIRECTORY)
     set(RTC_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

@@ -14,5 +14,9 @@ just build               # Incrementally build RelWithDebInfo without running
 just configure           # Generate the Windows x64 build tree
 just fetch-deps          # Download, build, and install the dependencies locally
 just clean               # Clean the application, retaining built dependencies
-just run "D:/other data" # Inspect a different directory
+just run "D:/other data" # Use this directory for the NetCDF experiment
 ```
+
+At the menu, enter experiment numbers separated by spaces. For example,
+`2 1 2` runs experiment 2, then 1, then 2 again. Unknown numbers are skipped.
+Press Enter on a blank line to quit.
